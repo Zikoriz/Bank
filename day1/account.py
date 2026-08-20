@@ -59,6 +59,15 @@ class BankAccount(AbstractAccount):
         if account_number is None:
             account_number = str(uuid.uuid4())[:8]
 
+        if not isinstance(account_number, str):
+            raise TypeError("Account number must be a string")
+
+        if not account_number.strip():
+            raise ValueError("Account number cannot be empty")
+
+        if len(account_number) < 4:
+            raise ValueError("Account number must contain at least 4 characters")
+
         super().__init__(
             account_number=account_number,
             owner=owner,
@@ -109,7 +118,7 @@ class BankAccount(AbstractAccount):
             f"****{last_four} | "
             f"Status: {self.status} | "
             f"Balance: {self._balance} {self.currency}"
-        )    
+        )
 
     def get_account_info(self):
         return {
