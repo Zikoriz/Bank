@@ -1,4 +1,4 @@
-from exceptions import (
+from .exceptions import (
     AccountFrozenError,
     AccountClosedError,
     InvalidOperationError,
@@ -91,6 +91,12 @@ class BankAccount(AbstractAccount):
             raise InvalidOperationError("Amount must be greater than zero")
 
         self._balance += amount
+    def _check_account_status(self):
+        if self.status == "frozen":
+            raise AccountFrozenError("Account is frozen")
+
+        if self.status == "closed":
+            raise AccountClosedError("Account is closed")
 
     def withdraw(self, amount):
         if self.status == "frozen":
