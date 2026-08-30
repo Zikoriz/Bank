@@ -66,7 +66,9 @@ class BankAccount(AbstractAccount):
             raise ValueError("Account number cannot be empty")
 
         if len(account_number) < 4:
-            raise ValueError("Account number must contain at least 4 characters")
+            raise ValueError(
+                "Account number must contain at least 4 characters"
+            )
 
         super().__init__(
             account_number=account_number,
@@ -77,20 +79,10 @@ class BankAccount(AbstractAccount):
 
         self.currency = currency
 
-    def deposit(self, amount):
-        if self.status == "frozen":
-            raise AccountFrozenError("Account is frozen")
+    @property
+    def balance(self):
+        return self._balance
 
-        if self.status == "closed":
-            raise AccountClosedError("Account is closed")
-
-        if not isinstance(amount, (int, float)):
-            raise InvalidOperationError("Amount must be a number")
-
-        if amount <= 0:
-            raise InvalidOperationError("Amount must be greater than zero")
-
-        self._balance += amount
     def _check_account_status(self):
         if self.status == "frozen":
             raise AccountFrozenError("Account is frozen")
@@ -98,18 +90,29 @@ class BankAccount(AbstractAccount):
         if self.status == "closed":
             raise AccountClosedError("Account is closed")
 
-    def withdraw(self, amount):
-        if self.status == "frozen":
-            raise AccountFrozenError("Account is frozen")
-
-        if self.status == "closed":
-            raise AccountClosedError("Account is closed")
+    def deposit(self, amount):
+        self._check_account_status()
 
         if not isinstance(amount, (int, float)):
             raise InvalidOperationError("Amount must be a number")
 
         if amount <= 0:
-            raise InvalidOperationError("Amount must be greater than zero")
+            raise InvalidOperationError(
+                "Amount must be greater than zero"
+            )
+
+        self._balance += amount
+
+    def withdraw(self, amount):
+        self._check_account_status()
+
+        if not isinstance(amount, (int, float)):
+            raise InvalidOperationError("Amount must be a number")
+
+        if amount <= 0:
+            raise InvalidOperationError(
+                "Amount must be greater than zero"
+            )
 
         if amount > self._balance:
             raise InsufficientFundsError("Insufficient funds")
@@ -118,6 +121,7 @@ class BankAccount(AbstractAccount):
 
     def __str__(self):
         last_four = self.account_number[-4:]
+
         return (
             f"BankAccount | "
             f"Client: {self.owner} | "
