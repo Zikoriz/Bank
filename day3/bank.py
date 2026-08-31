@@ -60,6 +60,13 @@ class Bank:
         if account_type not in account_classes:
             raise ValueError("Invalid account type")
 
+        # Проверяем номер заранее, если он был передан вручную.
+        account_number = kwargs.get("account_number")
+
+        if account_number is not None:
+            if account_number in self.accounts:
+                raise ValueError("Account number already exists")
+
         account_class = account_classes[account_type]
 
         account = account_class(
@@ -68,6 +75,10 @@ class Bank:
             currency=currency,
             **kwargs
         )
+
+        # Дополнительная защита от совпадения номера.
+        if account.account_number in self.accounts:
+            raise ValueError("Account number already exists")
 
         self.accounts[account.account_number] = account
         client.add_account(account.account_number)
@@ -86,6 +97,12 @@ class Bank:
             raise AccountClosedError("Account is already closed")
 
         account.status = "closed"
+
+        # Удаляем номер закрытого счёта у владельца.
+        for client in self.clients.values():
+            if account_number in client.account_numbers:
+                client.remove_account(account_number)
+                break
 
     def freeze_account(self, account_number):
         self._check_operation_time()
@@ -199,32 +216,45 @@ class Bank:
         return results
 
     def get_total_balance(self):
-        return sum(
-            account.balance
-            for account in self.accounts.values()
-        )
+        total_balance = {}
+
+        for account in self.accounts.values():
+            if account.status == "closed":
+                continue
+
+            currency = account.currency
+
+            total_balance[currency] = (
+                total_balance.get(currency, 0) + account.balance
+            )
+
+        return total_balance
 
     def get_clients_ranking(self):
         ranking = []
 
         for client in self.clients.values():
-            total_balance = 0
+            balances = {}
 
             for account_number in client.account_numbers:
                 account = self.accounts.get(account_number)
 
-                if account is not None:
-                    total_balance += account.balance
+                if account is None:
+                    continue
+
+                if account.status == "closed":
+                    continue
+
+                currency = account.currency
+
+                balances[currency] = (
+                    balances.get(currency, 0) + account.balance
+                )
 
             ranking.append({
                 "client_id": client.client_id,
                 "full_name": client.full_name,
-                "total_balance": total_balance
+                "balances": balances,
             })
-
-        ranking.sort(
-            key=lambda client: client["total_balance"],
-            reverse=True
-        )
 
         return ranking

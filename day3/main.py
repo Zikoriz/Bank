@@ -113,12 +113,17 @@ def test_freeze_and_unfreeze(bank, account):
     print(account)
 
 
-def test_close_account(bank, account):
+def test_close_account(bank, client, account):
     print("\n=== CLOSE ACCOUNT ===")
+
+    print("До закрытия:")
+    print(f"Счета клиента: {client.account_numbers}")
 
     bank.close_account(account.account_number)
 
+    print("После закрытия:")
     print(account)
+    print(f"Счета клиента: {client.account_numbers}")
 
     try:
         bank.unfreeze_account(account.account_number)
@@ -131,6 +136,36 @@ def test_invalid_account(bank):
 
     try:
         bank.freeze_account("UNKNOWN123")
+    except ValueError as error:
+        print(f"Ошибка: {error}")
+
+
+def test_duplicate_account_number(bank):
+    print("\n=== DUPLICATE ACCOUNT NUMBER ===")
+
+    account_number = "DUPLICATE1"
+
+    try:
+        bank.open_account(
+            client_id="C001",
+            account_type="savings",
+            balance=5000,
+            currency="USD",
+            account_number=account_number,
+            min_balance=1000,
+            monthly_interest_rate=0.01
+        )
+
+        bank.open_account(
+            client_id="C002",
+            account_type="savings",
+            balance=3000,
+            currency="USD",
+            account_number=account_number,
+            min_balance=1000,
+            monthly_interest_rate=0.01
+        )
+
     except ValueError as error:
         print(f"Ошибка: {error}")
 
@@ -191,6 +226,18 @@ def test_search_and_statistics(bank, client_1, savings_account):
     for account in bank.search_accounts(client_id="C001"):
         print(account)
 
+    print("\nSavings счета:")
+    for account in bank.search_accounts(account_type="savings"):
+        print(account)
+
+    print("\nPremium счета:")
+    for account in bank.search_accounts(account_type="premium"):
+        print(account)
+
+    print("\nInvestment счета:")
+    for account in bank.search_accounts(account_type="investment"):
+        print(account)
+
     print("\nАктивные счета:")
     for account in bank.search_accounts(status="active"):
         print(account)
@@ -202,7 +249,7 @@ def test_search_and_statistics(bank, client_1, savings_account):
         print(account)
 
     print("\n=== TOTAL BALANCE ===")
-    print(f"Общий баланс: {bank.get_total_balance()}")
+    print(f"Общий баланс по валютам: {bank.get_total_balance()}")
 
     print("\n=== CLIENTS RANKING ===")
     for client in bank.get_clients_ranking():
@@ -235,12 +282,35 @@ def main():
         investment_account
     ) = test_clients_and_accounts(bank)
 
-    test_freeze_and_unfreeze(bank, savings_account)
-    test_close_account(bank, premium_account)
+    test_freeze_and_unfreeze(
+        bank,
+        savings_account
+    )
+
+    test_close_account(
+        bank,
+        client_1,
+        premium_account
+    )
+
     test_invalid_account(bank)
-    test_authentication(bank, client_1, client_2)
+
+    test_duplicate_account_number(bank)
+
+    test_authentication(
+        bank,
+        client_1,
+        client_2
+    )
+
     test_night_restriction(bank)
-    test_search_and_statistics(bank, client_1, savings_account)
+
+    test_search_and_statistics(
+        bank,
+        client_1,
+        savings_account
+    )
+
     test_client_age_validation()
 
 
