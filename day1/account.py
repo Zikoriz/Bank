@@ -39,7 +39,8 @@ class BankAccount(AbstractAccount):
         balance=0,
         status="active",
         currency="RUB",
-        account_number=None
+        account_number=None,
+        operation_time_checker=None
     ):
         if not isinstance(owner, str) or not owner.strip():
             raise ValueError("Owner must be a non-empty string")
@@ -78,10 +79,15 @@ class BankAccount(AbstractAccount):
         )
 
         self.currency = currency
+        self._operation_time_checker = operation_time_checker
 
     @property
     def balance(self):
         return self._balance
+
+    def _check_operation_time(self):
+        if self._operation_time_checker is not None:
+            self._operation_time_checker()
 
     def _check_account_status(self):
         if self.status == "frozen":
@@ -91,6 +97,7 @@ class BankAccount(AbstractAccount):
             raise AccountClosedError("Account is closed")
 
     def deposit(self, amount):
+        self._check_operation_time()
         self._check_account_status()
 
         if not isinstance(amount, (int, float)):
@@ -104,6 +111,7 @@ class BankAccount(AbstractAccount):
         self._balance += amount
 
     def withdraw(self, amount):
+        self._check_operation_time()
         self._check_account_status()
 
         if not isinstance(amount, (int, float)):

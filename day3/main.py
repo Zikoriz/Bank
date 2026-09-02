@@ -125,6 +125,21 @@ def test_close_account(bank, client, account):
     print(account)
     print(f"Счета клиента: {client.account_numbers}")
 
+    if account.account_number in client.account_numbers:
+        print("Связь клиента с закрытым счётом сохранена")
+    else:
+        print("Ошибка: связь клиента со счётом потеряна")
+
+    print("\nПоиск закрытого счёта клиента:")
+
+    closed_accounts = bank.search_accounts(
+        client_id=client.client_id,
+        status="closed"
+    )
+
+    for closed_account in closed_accounts:
+        print(closed_account)
+
     try:
         bank.unfreeze_account(account.account_number)
     except AccountClosedError as error:
@@ -189,6 +204,31 @@ def test_night_restriction(bank):
         print(f"Ошибка: {error}")
 
 
+def test_night_money_operations(bank, account):
+    print("\n=== NIGHT MONEY OPERATIONS ===")
+
+    original_checker = account._operation_time_checker
+
+    def night_time_checker():
+        bank._check_operation_time(
+            datetime(2026, 8, 30, 2, 30)
+        )
+
+    account._operation_time_checker = night_time_checker
+
+    try:
+        account.deposit(100)
+    except PermissionError as error:
+        print(f"Deposit: {error}")
+
+    try:
+        account.withdraw(100)
+    except PermissionError as error:
+        print(f"Withdraw: {error}")
+
+    account._operation_time_checker = original_checker
+
+
 def test_search_and_statistics(bank, client_1, savings_account):
     print("\n=== SEARCH ACCOUNTS ===")
 
@@ -210,6 +250,10 @@ def test_search_and_statistics(bank, client_1, savings_account):
 
     print("\nАктивные счета:")
     for account in bank.search_accounts(status="active"):
+        print(account)
+
+    print("\nЗакрытые счета:")
+    for account in bank.search_accounts(status="closed"):
         print(account)
 
     print("\nПоиск по номеру:")
@@ -271,7 +315,10 @@ def test_duplicate_account_number(bank):
     except ValueError as error:
         print(f"Ошибка: {error}")
 
-    bank.accounts.pop(first_account.account_number, None)
+    bank.accounts.pop(
+        first_account.account_number,
+        None
+    )
 
     bank.clients["C001"].remove_account(
         first_account.account_number
@@ -326,6 +373,11 @@ def main():
     )
 
     test_night_restriction(bank)
+
+    test_night_money_operations(
+        bank,
+        savings_account
+    )
 
     test_search_and_statistics(
         bank,

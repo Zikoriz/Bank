@@ -72,6 +72,7 @@ class Bank:
             owner=client.full_name,
             balance=balance,
             currency=currency,
+            operation_time_checker=self._check_operation_time,
             **kwargs
         )
 
@@ -95,11 +96,6 @@ class Bank:
             raise AccountClosedError("Account is already closed")
 
         account.status = "closed"
-
-        for client in self.clients.values():
-            if account_number in client.account_numbers:
-                client.remove_account(account_number)
-                break
 
     def freeze_account(self, account_number):
         self._check_operation_time()

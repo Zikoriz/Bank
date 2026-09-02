@@ -14,7 +14,8 @@ class SavingsAccount(BankAccount):
         currency="RUB",
         account_number=None,
         min_balance=0,
-        monthly_interest_rate=0
+        monthly_interest_rate=0,
+        operation_time_checker=None
     ):
         if not isinstance(min_balance, (int, float)):
             raise TypeError("Minimum balance must be a number")
@@ -36,13 +37,15 @@ class SavingsAccount(BankAccount):
             balance=balance,
             status=status,
             currency=currency,
-            account_number=account_number
+            account_number=account_number,
+            operation_time_checker=operation_time_checker
         )
 
         self.min_balance = min_balance
         self.monthly_interest_rate = monthly_interest_rate
 
     def withdraw(self, amount):
+        self._check_operation_time()
         self._check_account_status()
 
         if not isinstance(amount, (int, float)):
@@ -61,6 +64,7 @@ class SavingsAccount(BankAccount):
         self._balance -= amount
 
     def apply_monthly_interest(self):
+        self._check_operation_time()
         self._check_account_status()
 
         interest = self._balance * self.monthly_interest_rate
@@ -98,7 +102,8 @@ class PremiumAccount(BankAccount):
         account_number=None,
         withdraw_limit=10000,
         overdraft_limit=5000,
-        monthly_fee=100
+        monthly_fee=100,
+        operation_time_checker=None
     ):
         if not isinstance(withdraw_limit, (int, float)):
             raise TypeError("Withdraw limit must be a number")
@@ -123,7 +128,8 @@ class PremiumAccount(BankAccount):
             balance=balance,
             status=status,
             currency=currency,
-            account_number=account_number
+            account_number=account_number,
+            operation_time_checker=operation_time_checker
         )
 
         self.withdraw_limit = withdraw_limit
@@ -131,6 +137,7 @@ class PremiumAccount(BankAccount):
         self.monthly_fee = monthly_fee
 
     def withdraw(self, amount):
+        self._check_operation_time()
         self._check_account_status()
 
         if not isinstance(amount, (int, float)):
@@ -195,14 +202,16 @@ class InvestmentAccount(BankAccount):
         status="active",
         currency="RUB",
         account_number=None,
-        portfolio=None
+        portfolio=None,
+        operation_time_checker=None
     ):
         super().__init__(
             owner=owner,
             balance=balance,
             status=status,
             currency=currency,
-            account_number=account_number
+            account_number=account_number,
+            operation_time_checker=operation_time_checker
         )
 
         if portfolio is None:
@@ -228,6 +237,7 @@ class InvestmentAccount(BankAccount):
         self.portfolio = portfolio.copy()
 
     def withdraw(self, amount):
+        self._check_operation_time()
         self._check_account_status()
 
         if not isinstance(amount, (int, float)):
