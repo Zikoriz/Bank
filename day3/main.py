@@ -140,36 +140,6 @@ def test_invalid_account(bank):
         print(f"Ошибка: {error}")
 
 
-def test_duplicate_account_number(bank):
-    print("\n=== DUPLICATE ACCOUNT NUMBER ===")
-
-    account_number = "DUPLICATE1"
-
-    try:
-        bank.open_account(
-            client_id="C001",
-            account_type="savings",
-            balance=5000,
-            currency="USD",
-            account_number=account_number,
-            min_balance=1000,
-            monthly_interest_rate=0.01
-        )
-
-        bank.open_account(
-            client_id="C002",
-            account_type="savings",
-            balance=3000,
-            currency="USD",
-            account_number=account_number,
-            min_balance=1000,
-            monthly_interest_rate=0.01
-        )
-
-    except ValueError as error:
-        print(f"Ошибка: {error}")
-
-
 def test_authentication(bank, client_1, client_2):
     print("\n=== AUTHENTICATION ===")
 
@@ -249,11 +219,65 @@ def test_search_and_statistics(bank, client_1, savings_account):
         print(account)
 
     print("\n=== TOTAL BALANCE ===")
-    print(f"Общий баланс по валютам: {bank.get_total_balance()}")
+
+    total_balance = bank.get_total_balance()
+
+    for currency, balance in total_balance.items():
+        print(f"{currency}: {balance}")
 
     print("\n=== CLIENTS RANKING ===")
-    for client in bank.get_clients_ranking():
-        print(client)
+
+    ranking = bank.get_clients_ranking()
+
+    for currency, clients in ranking.items():
+        print(f"\n{currency}:")
+
+        for position, client in enumerate(clients, start=1):
+            print(
+                f"{position}. "
+                f"{client['full_name']} "
+                f"({client['client_id']}) - "
+                f"{client['balance']} {currency}"
+            )
+
+
+def test_duplicate_account_number(bank):
+    print("\n=== DUPLICATE ACCOUNT NUMBER ===")
+
+    account_number = "DUPLICATE1"
+
+    first_account = bank.open_account(
+        client_id="C001",
+        account_type="savings",
+        balance=5000,
+        currency="USD",
+        account_number=account_number,
+        min_balance=1000,
+        monthly_interest_rate=0.01
+    )
+
+    print("Первый счёт с указанным номером создан")
+
+    try:
+        bank.open_account(
+            client_id="C001",
+            account_type="savings",
+            balance=3000,
+            currency="USD",
+            account_number=account_number,
+            min_balance=1000,
+            monthly_interest_rate=0.01
+        )
+    except ValueError as error:
+        print(f"Ошибка: {error}")
+
+    bank.accounts.pop(first_account.account_number, None)
+
+    bank.clients["C001"].remove_account(
+        first_account.account_number
+    )
+
+    print("Тестовый счёт удалён")
 
 
 def test_client_age_validation():
@@ -295,8 +319,6 @@ def main():
 
     test_invalid_account(bank)
 
-    test_duplicate_account_number(bank)
-
     test_authentication(
         bank,
         client_1,
@@ -310,6 +332,8 @@ def main():
         client_1,
         savings_account
     )
+
+    test_duplicate_account_number(bank)
 
     test_client_age_validation()
 

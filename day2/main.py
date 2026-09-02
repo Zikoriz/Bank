@@ -60,8 +60,8 @@ def test_premium_account():
     account.withdraw(4000)
     print(account)
 
-    print("\nМесячная комиссия:")
-    account.apply_monthly_fee()
+    print("\nОперация снятия с комиссией:")
+    account.withdraw(400)
     print(account)
 
     print("\nПопытка превысить лимит снятия:")
@@ -132,6 +132,7 @@ def test_frozen_accounts():
     except AccountFrozenError as error:
         print(f"Ошибка: {error}")
 
+
 def test_closed_accounts():
     print("\n=== CLOSED ACCOUNT TEST ===")
 
@@ -149,12 +150,14 @@ def test_closed_accounts():
     except AccountClosedError as error:
         print(f"Ошибка: {error}")
 
+
 def main():
-        test_savings_account()
-        test_premium_account()
-        test_investment_account()
-        test_frozen_accounts()
-        test_closed_accounts()
+    test_savings_account()
+    test_premium_account()
+    test_investment_account()
+    test_frozen_accounts()
+    test_closed_accounts()
+
 
 if __name__ == "__main__":
     main()

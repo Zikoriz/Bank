@@ -60,7 +60,6 @@ class Bank:
         if account_type not in account_classes:
             raise ValueError("Invalid account type")
 
-        # Проверяем номер заранее, если он был передан вручную.
         account_number = kwargs.get("account_number")
 
         if account_number is not None:
@@ -76,7 +75,6 @@ class Bank:
             **kwargs
         )
 
-        # Дополнительная защита от совпадения номера.
         if account.account_number in self.accounts:
             raise ValueError("Account number already exists")
 
@@ -98,7 +96,6 @@ class Bank:
 
         account.status = "closed"
 
-        # Удаляем номер закрытого счёта у владельца.
         for client in self.clients.values():
             if account_number in client.account_numbers:
                 client.remove_account(account_number)
@@ -231,11 +228,9 @@ class Bank:
         return total_balance
 
     def get_clients_ranking(self):
-        ranking = []
+        ranking = {}
 
         for client in self.clients.values():
-            balances = {}
-
             for account_number in client.account_numbers:
                 account = self.accounts.get(account_number)
 
@@ -247,14 +242,29 @@ class Bank:
 
                 currency = account.currency
 
-                balances[currency] = (
-                    balances.get(currency, 0) + account.balance
-                )
+                if currency not in ranking:
+                    ranking[currency] = []
 
-            ranking.append({
-                "client_id": client.client_id,
-                "full_name": client.full_name,
-                "balances": balances,
-            })
+                client_entry = None
+
+                for item in ranking[currency]:
+                    if item["client_id"] == client.client_id:
+                        client_entry = item
+                        break
+
+                if client_entry is None:
+                    ranking[currency].append({
+                        "client_id": client.client_id,
+                        "full_name": client.full_name,
+                        "balance": account.balance,
+                    })
+                else:
+                    client_entry["balance"] += account.balance
+
+        for currency in ranking:
+            ranking[currency].sort(
+                key=lambda client: client["balance"],
+                reverse=True
+            )
 
         return ranking

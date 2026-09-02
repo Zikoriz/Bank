@@ -49,7 +49,9 @@ class SavingsAccount(BankAccount):
             raise InvalidOperationError("Amount must be a number")
 
         if amount <= 0:
-            raise InvalidOperationError("Amount must be greater than zero")
+            raise InvalidOperationError(
+                "Amount must be greater than zero"
+            )
 
         if self._balance - amount < self.min_balance:
             raise InvalidOperationError(
@@ -135,29 +137,23 @@ class PremiumAccount(BankAccount):
             raise InvalidOperationError("Amount must be a number")
 
         if amount <= 0:
-            raise InvalidOperationError("Amount must be greater than zero")
+            raise InvalidOperationError(
+                "Amount must be greater than zero"
+            )
 
         if amount > self.withdraw_limit:
             raise InvalidOperationError(
                 "Withdrawal limit exceeded"
             )
 
-        if self._balance - amount < -self.overdraft_limit:
+        total_amount = amount + self.monthly_fee
+
+        if self._balance - total_amount < -self.overdraft_limit:
             raise InsufficientFundsError(
                 "Overdraft limit exceeded"
             )
 
-        self._balance -= amount
-
-    def apply_monthly_fee(self):
-        self._check_account_status()
-
-        if self._balance - self.monthly_fee < -self.overdraft_limit:
-            raise InsufficientFundsError(
-                "Cannot charge monthly fee: overdraft limit exceeded"
-            )
-
-        self._balance -= self.monthly_fee
+        self._balance -= total_amount
 
     def get_account_info(self):
         info = super().get_account_info()
@@ -253,6 +249,7 @@ class InvestmentAccount(BankAccount):
         for asset, amount in self.portfolio.items():
             rate = self.GROWTH_RATES[asset]
             growth = amount * rate
+
             projected_growth[asset] = {
                 "current": amount,
                 "growth": growth,
