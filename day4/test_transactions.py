@@ -34,13 +34,43 @@ class TransactionSystemTests(unittest.TestCase):
 
     def test_premium_account_can_use_overdraft(self):
         premium = PremiumAccount(
-            "Roman", balance=100, currency="USD", account_number="PREMIUM01", overdraft_limit=500
+            "Roman", balance=100, currency="USD", account_number="PREMIUM01",
+            overdraft_limit=500, monthly_fee=100,
         )
         self.processor.accounts["PREMIUM01"] = premium
         transaction = Transaction("PREMIUM01", "RECIP01", 300, "USD")
         self.processor.process(transaction)
         self.assertEqual(transaction.status, TransactionStatus.COMPLETED)
-        self.assertEqual(premium.balance, -200)
+        self.assertEqual(premium.balance, -300)
+
+    def test_savings_minimum_balance_is_enforced(self):
+        self.sender.min_balance = 950
+        transaction = Transaction("SENDER01", "RECIP01", 100, "USD")
+        self.processor.process(transaction)
+        self.assertEqual(transaction.status, TransactionStatus.REJECTED)
+        self.assertEqual(self.sender.balance, 1_000)
+
+    def test_premium_withdraw_limit_is_enforced(self):
+        premium = PremiumAccount(
+            "Roman", balance=10_000, currency="USD", account_number="PREMIUM01",
+            withdraw_limit=100, monthly_fee=0,
+        )
+        self.processor.accounts["PREMIUM01"] = premium
+        transaction = Transaction("PREMIUM01", "RECIP01", 101, "USD")
+        self.processor.process(transaction)
+        self.assertEqual(transaction.status, TransactionStatus.REJECTED)
+        self.assertEqual(premium.balance, 10_000)
+
+    def test_operation_time_restriction_is_enforced(self):
+        def prohibit_operations():
+            raise PermissionError("Operations are prohibited from 00:00 to 05:00")
+
+        self.sender._operation_time_checker = prohibit_operations
+        transaction = Transaction("SENDER01", "RECIP01", 100, "USD")
+        self.processor.process(transaction)
+        self.assertEqual(transaction.status, TransactionStatus.REJECTED)
+        self.assertEqual(self.sender.balance, 1_000)
+        self.assertEqual(self.recipient.balance, 100)
 
     def test_frozen_account_is_rejected(self):
         self.sender.status = "frozen"

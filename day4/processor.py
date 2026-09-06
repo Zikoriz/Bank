@@ -2,8 +2,12 @@
 
 from decimal import Decimal
 
-from day1.exceptions import AccountClosedError, AccountFrozenError, InsufficientFundsError
-from day2.account import PremiumAccount
+from day1.exceptions import (
+    AccountClosedError,
+    AccountFrozenError,
+    InsufficientFundsError,
+    InvalidOperationError,
+)
 
 from .transaction import Transaction, TransactionStatus, to_money
 
@@ -42,7 +46,15 @@ class TransactionProcessor:
             transaction.set_status(TransactionStatus.PROCESSING)
             try:
                 self._process_once(transaction)
-            except (AccountFrozenError, AccountClosedError, InsufficientFundsError, ValueError, TypeError) as error:
+            except (
+                AccountFrozenError,
+                AccountClosedError,
+                InsufficientFundsError,
+                InvalidOperationError,
+                PermissionError,
+                ValueError,
+                TypeError,
+            ) as error:
                 self._reject(transaction, str(error))
                 return transaction
             except Exception as error:  # operational faults may be transient
@@ -70,12 +82,16 @@ class TransactionProcessor:
             raise ValueError("Transaction currency must match sender account currency")
 
         transaction.fee = self.calculate_fee(transaction)
-        self._debit(sender, transaction.total_debit)
+        credited = self._convert(transaction.amount, sender.currency, recipient.currency)
+
+        debited = False
         try:
-            credited = self._convert(transaction.amount, sender.currency, recipient.currency)
+            self._debit(sender, transaction.total_debit)
+            debited = True
             self._credit(recipient, credited)
         except Exception:
-            sender._balance += float(transaction.total_debit)
+            if debited:
+                self._credit(sender, transaction.total_debit)
             raise
         transaction.converted_amount = credited
         transaction.destination_currency = recipient.currency
@@ -94,21 +110,14 @@ class TransactionProcessor:
             raise AccountClosedError(f"{role} account is closed")
 
     @staticmethod
-    def _balance(account):
-        return to_money(account.balance, "account balance")
-
-    def _debit(self, account, amount):
-        balance_after = self._balance(account) - amount
-        if isinstance(account, PremiumAccount):
-            if balance_after < -to_money(account.overdraft_limit, "overdraft limit"):
-                raise InsufficientFundsError("Overdraft limit exceeded")
-        elif balance_after < 0:
-            raise InsufficientFundsError("Insufficient funds")
-        account._balance = float(balance_after)
+    def _debit(account, amount):
+        """Withdraw through the account's domain rules."""
+        account.withdraw(float(amount))
 
     @staticmethod
     def _credit(account, amount):
-        account._balance = float(to_money(account.balance, "account balance") + amount)
+        """Deposit through the account's domain rules."""
+        account.deposit(float(amount))
 
     def _convert(self, amount, source_currency, target_currency):
         if source_currency == target_currency:
