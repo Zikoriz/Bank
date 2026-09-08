@@ -29,6 +29,8 @@ class RiskControlledProcessor(TransactionProcessor):
                                transaction_id=transaction.transaction_id, client_id=client_id)
             return transaction
         result = super().process(transaction)
+        if result.status == TransactionStatus.COMPLETED:
+            self.risk_analyzer.record_successful_transaction(result, client_id)
         severity = Severity.INFO if result.status == TransactionStatus.COMPLETED else Severity.ERROR
         self.audit_log.log("transaction_processed", severity,
                            "Transaction completed" if severity == Severity.INFO else result.rejection_reason,

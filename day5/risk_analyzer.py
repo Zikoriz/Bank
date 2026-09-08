@@ -3,10 +3,9 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import timedelta
-from decimal import Decimal
 from enum import Enum
 
-from day4.transaction import to_money
+from day4.transaction import TransactionStatus, to_money
 
 
 class RiskLevel(str, Enum):
@@ -58,7 +57,10 @@ class RiskAnalyzer:
             reasons.append("frequent_transactions")
 
         recipients = self._known_recipients[client_key]
-        if recipients and transaction.recipient not in recipients:
+        # An empty history means that *every* recipient, including the first,
+        # is unknown.  ``analyze`` must not make the recipient trusted: the
+        # transfer can still be rejected by a risk rule or by the bank.
+        if transaction.recipient not in recipients:
             reasons.append("new_recipient")
         if self._is_night(at.hour):
             reasons.append("night_operation")
@@ -71,10 +73,20 @@ class RiskAnalyzer:
             level = RiskLevel.MEDIUM
 
         history.append(at)
-        recipients.add(transaction.recipient)
         report = RiskReport(transaction.transaction_id, client_id, level, tuple(reasons), at)
         self.reports.append(report)
         return report
+
+    def record_successful_transaction(self, transaction, client_id=None):
+        """Trust a recipient only after the bank has completed the transfer."""
+        if transaction.status != TransactionStatus.COMPLETED:
+            raise ValueError("Only completed transactions can make a recipient trusted")
+        client_key = client_id or transaction.sender
+        self._known_recipients[client_key].add(transaction.recipient)
+
+    def is_known_recipient(self, recipient, client_id=None):
+        """Return whether this client has successfully transferred to recipient."""
+        return recipient in self._known_recipients[client_id]
 
     def suspicious_transactions(self, client_id=None):
         return [report for report in self.reports if report.is_suspicious and

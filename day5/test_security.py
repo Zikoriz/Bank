@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -21,12 +20,17 @@ class Day5SecurityTests(unittest.TestCase):
             account_clients={"SENDER": "CLIENT-1"},
         )
 
-    def test_regular_transaction_is_completed_and_audited(self):
-        transaction = Transaction("SENDER", "RECIPIENT", 1_000, "RUB")
-        self.processor.process(transaction)
-        self.assertEqual(transaction.status, TransactionStatus.COMPLETED)
+    def test_first_new_recipient_is_detected_then_becomes_trusted_after_completion(self):
+        first = Transaction("SENDER", "RECIPIENT", 1_000, "RUB")
+        second = Transaction("SENDER", "RECIPIENT", 1_000, "RUB")
+        self.processor.process(first)
+        self.processor.process(second)
+        self.assertEqual(first.status, TransactionStatus.COMPLETED)
+        self.assertEqual(self.analyzer.reports[-2].level, RiskLevel.MEDIUM)
+        self.assertIn("new_recipient", self.analyzer.reports[-2].reasons)
+        self.assertTrue(self.analyzer.is_known_recipient("RECIPIENT", "CLIENT-1"))
         self.assertEqual(self.analyzer.reports[-1].level, RiskLevel.LOW)
-        self.assertEqual(len(self.audit_log.filter(event_type="transaction_processed")), 1)
+        self.assertEqual(len(self.audit_log.filter(event_type="transaction_processed")), 2)
 
     def test_large_amount_is_blocked_before_debit(self):
         transaction = Transaction("SENDER", "RECIPIENT", 100_000, "RUB")
@@ -35,6 +39,17 @@ class Day5SecurityTests(unittest.TestCase):
         self.assertIn("large_amount", transaction.rejection_reason)
         self.assertEqual(self.sender.balance, 500_000)
         self.assertEqual(self.audit_log.events[-1].severity, Severity.CRITICAL)
+
+    def test_blocked_transfer_does_not_make_recipient_trusted(self):
+        blocked = Transaction("SENDER", "RECIPIENT", 100_000, "RUB")
+        follow_up = Transaction("SENDER", "RECIPIENT", 1_000, "RUB")
+        self.processor.process(blocked)
+        self.assertEqual(blocked.status, TransactionStatus.REJECTED)
+        self.assertFalse(self.analyzer.is_known_recipient("RECIPIENT", "CLIENT-1"))
+        self.processor.process(follow_up)
+        self.assertIn("new_recipient", self.analyzer.reports[-1].reasons)
+        self.assertEqual(follow_up.status, TransactionStatus.COMPLETED)
+        self.assertTrue(self.analyzer.is_known_recipient("RECIPIENT", "CLIENT-1"))
 
     def test_frequent_new_and_night_operations_are_detected(self):
         analyzer = RiskAnalyzer(frequent_count=3)
