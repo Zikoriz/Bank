@@ -146,6 +146,7 @@ def make_report(bank, transactions, risk_analyzer, audit_log):
         "statistics": dict(statuses),
         "history": dict(history),
         "suspicious": risk_analyzer.suspicious_transactions(),
+        "risk_analyzer": risk_analyzer,
         "top_clients": ranking,
         "total_balance": bank.get_total_balance(),
     }
