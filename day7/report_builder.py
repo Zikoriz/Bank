@@ -50,6 +50,8 @@ class ReportBuilder:
                         if transaction.sender in account_numbers or transaction.recipient in account_numbers]
         sent = [transaction for transaction in transactions if transaction.sender in account_numbers]
         received = [transaction for transaction in transactions if transaction.recipient in account_numbers]
+        completed_sent = [transaction for transaction in sent if self._value(transaction.status) == "completed"]
+        completed_received = [transaction for transaction in received if self._value(transaction.status) == "completed"]
 
         return {
             "report_type": "client",
@@ -66,8 +68,10 @@ class ReportBuilder:
                 "transactions": len(transactions),
                 "sent_transactions": len(sent),
                 "received_transactions": len(received),
-                "sent_amounts_by_currency": self._amounts_by_currency(sent),
-                "received_amounts_by_currency": self._amounts_by_currency(received),
+                "completed_sent_transactions": len(completed_sent),
+                "completed_received_transactions": len(completed_received),
+                "sent_amounts_by_currency": self._amounts_by_currency(completed_sent),
+                "received_amounts_by_currency": self._amounts_by_currency(completed_received, use_converted=True),
                 "statuses": self._status_counts(transactions),
             },
             "risk": self._client_risk(client_id),
@@ -96,7 +100,9 @@ class ReportBuilder:
                 "balances_by_currency": self._balances_by_currency(accounts),
                 "transaction_count": len(self.transactions),
                 "statuses": self._status_counts(self.transactions),
-                "transaction_amounts_by_currency": self._amounts_by_currency(self.transactions),
+                "transaction_amounts_by_currency": self._amounts_by_currency(
+                    [transaction for transaction in self.transactions
+                     if self._value(transaction.status) == "completed"]),
             },
             "clients": clients,
             "accounts": accounts,
@@ -210,11 +216,11 @@ class ReportBuilder:
         """Create a client-balance bar chart and a bank balance-history chart."""
         rows = []
         for client in self.bank.clients.values():
-            total = sum((self._decimal(self.bank.accounts[number].balance)
-                         for number in client.account_numbers if number in self.bank.accounts), Decimal("0"))
-            rows.append((client.full_name, total))
+            accounts = [self._account_data(self.bank.accounts[number])
+                        for number in client.account_numbers if number in self.bank.accounts]
+            rows.append((client.full_name, self._balances_by_currency(accounts)))
         charts = {
-            "bank_client_balances": self._bar_chart(rows, "Client balances"),
+            "bank_client_balances": self._grouped_bar_chart(rows, "Client balances"),
             "bank_balance_history": self._balance_chart(
                 [self._account_data(account) for account in self.bank.accounts.values()],
                 "Bank balance movement"),
@@ -294,10 +300,23 @@ class ReportBuilder:
         return dict(sorted(totals.items()))
 
     @staticmethod
-    def _amounts_by_currency(transactions):
+    def _amounts_by_currency(transactions, use_converted=False):
+        """Sum completed transactions by currency.
+
+        Only ``completed`` transactions move real money, so pending/rejected
+        ones are excluded. For incoming transfers, ``use_converted`` reports
+        the amount and currency actually credited (which may differ from the
+        sender's original amount/currency for cross-currency transfers).
+        """
         totals = defaultdict(lambda: Decimal("0"))
         for transaction in transactions:
-            totals[transaction.currency] += ReportBuilder._decimal(transaction.amount)
+            if ReportBuilder._value(transaction.status) != "completed":
+                continue
+            if use_converted and transaction.converted_amount is not None:
+                currency = transaction.destination_currency or transaction.currency
+                totals[currency] += ReportBuilder._decimal(transaction.converted_amount)
+            else:
+                totals[transaction.currency] += ReportBuilder._decimal(transaction.amount)
         return dict(sorted(totals.items()))
 
     @staticmethod
@@ -415,44 +434,85 @@ class ReportBuilder:
         """Create one reusable bar chart from named numeric values."""
         return self._bar_chart(list(values.items()), title)
 
+    def _grouped_bar_chart(self, rows, title):
+        """Bar chart with one bar per currency, grouped by label.
+
+        Accounts of different currencies are never summed together; each
+        currency gets its own bar (and legend entry) so amounts stay
+        comparable within their own unit.
+        """
+        plt = self._plt()
+        currencies = sorted({currency for _label, values in rows for currency in values})
+        figure, axis = plt.subplots(figsize=(8, 4.5))
+        if not currencies:
+            axis.text(0.5, 0.5, "No data", ha="center", va="center")
+        else:
+            width = 0.8 / len(currencies)
+            positions = range(len(rows))
+            for index, currency in enumerate(currencies):
+                offsets = [position + (index - (len(currencies) - 1) / 2) * width for position in positions]
+                heights = [float(values.get(currency, Decimal("0"))) for _label, values in rows]
+                axis.bar(offsets, heights, width=width, label=currency)
+            axis.set_xticks(list(positions))
+            axis.set_xticklabels([str(label) for label, _values in rows], rotation=35)
+            axis.legend()
+        axis.set_title(title)
+        axis.set_ylabel("Amount")
+        figure.tight_layout()
+        return figure
+
     def _balance_chart(self, accounts, title):
         """Reconstruct balance movement from completed transactions.
 
-        The transaction model stores final account balances but not snapshots.
-        Reversing completed transfer deltas yields a deterministic opening
-        balance, then each chronological transfer contributes one point.
+        The transaction model stores final account balances but not
+        snapshots. Reversing completed transfer deltas yields a deterministic
+        opening balance, then each chronological transfer contributes one
+        point. Accounts are grouped by currency and plotted as separate
+        series, since balances in different currencies cannot be summed.
         """
         plt = self._plt()
-        tracked = {account["account_number"]: self._decimal(account["balance"]) for account in accounts}
-        deltas = defaultdict(lambda: Decimal("0"))
-        completed = [item for item in self.transactions
-                     if self._value(item.status) == "completed" and
-                     (item.sender in tracked or item.recipient in tracked)]
-        for transaction in completed:
-            if transaction.sender in tracked:
-                deltas[transaction.sender] -= self._decimal(transaction.amount) + self._decimal(transaction.fee)
-            if transaction.recipient in tracked:
-                deltas[transaction.recipient] += self._decimal(
-                    transaction.converted_amount if transaction.converted_amount is not None else transaction.amount)
-        current = sum(tracked.values(), Decimal("0"))
-        opening = current - sum(deltas.values(), Decimal("0"))
-        points = [("Opening", float(opening))]
-        running = opening
-        for transaction in sorted(completed, key=lambda item: item.created_at):
-            delta = Decimal("0")
-            if transaction.sender in tracked:
-                delta -= self._decimal(transaction.amount) + self._decimal(transaction.fee)
-            if transaction.recipient in tracked:
-                delta += self._decimal(transaction.converted_amount if transaction.converted_amount is not None else transaction.amount)
-            running += delta
-            points.append((transaction.created_at, float(running)))
+        by_currency = defaultdict(dict)
+        for account in accounts:
+            by_currency[account["currency"]][account["account_number"]] = self._decimal(account["balance"])
+
         figure, axis = plt.subplots(figsize=(8, 4.5))
-        axis.plot(range(len(points)), [value for _label, value in points], marker="o")
+        max_points = 0
+        for currency, tracked in sorted(by_currency.items()):
+            deltas = defaultdict(lambda: Decimal("0"))
+            completed = [item for item in self.transactions
+                         if self._value(item.status) == "completed" and
+                         (item.sender in tracked or item.recipient in tracked)]
+            for transaction in completed:
+                if transaction.sender in tracked:
+                    deltas[transaction.sender] -= self._decimal(transaction.amount) + self._decimal(transaction.fee)
+                if transaction.recipient in tracked:
+                    deltas[transaction.recipient] += self._decimal(
+                        transaction.converted_amount if transaction.converted_amount is not None else transaction.amount)
+            current = sum(tracked.values(), Decimal("0"))
+            opening = current - sum(deltas.values(), Decimal("0"))
+            points = [float(opening)]
+            running = opening
+            for transaction in sorted(completed, key=lambda item: item.created_at):
+                delta = Decimal("0")
+                if transaction.sender in tracked:
+                    delta -= self._decimal(transaction.amount) + self._decimal(transaction.fee)
+                if transaction.recipient in tracked:
+                    delta += self._decimal(
+                        transaction.converted_amount if transaction.converted_amount is not None else transaction.amount)
+                running += delta
+                points.append(float(running))
+            axis.plot(range(len(points)), points, marker="o", label=currency)
+            max_points = max(max_points, len(points))
+
+        if max_points == 0:
+            axis.text(0.5, 0.5, "No data", ha="center", va="center")
+        else:
+            axis.legend()
         axis.set_title(title)
         axis.set_xlabel("Operations")
         axis.set_ylabel("Balance")
-        axis.set_xticks(range(len(points)))
-        axis.set_xticklabels(["Opening" if index == 0 else str(index) for index, _point in enumerate(points)], rotation=0)
+        axis.set_xticks(range(max_points))
+        axis.set_xticklabels(["Opening" if index == 0 else str(index) for index in range(max_points)], rotation=0)
         axis.grid(True, alpha=0.3)
         figure.tight_layout()
         return figure
