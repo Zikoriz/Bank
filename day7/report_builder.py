@@ -188,12 +188,19 @@ class ReportBuilder:
     # -- charts -------------------------------------------------------------
 
     def create_client_charts(self, client_id: str) -> dict[str, Any]:
-        """Create a balance pie chart and balance-movement line chart."""
+        """Create a balance bar chart and balance-movement line chart.
+
+        Balances are not shown as a pie: accounts can hold different
+        currencies (not comparable as parts of one whole) and a premium
+        account's overdraft can go negative, which ``matplotlib.pie`` rejects
+        outright. A per-currency bar chart handles both cases correctly.
+        """
         report = self.client_report(client_id)
         client = report["client"]
         charts = {
-            f"client_{client_id}_balances": self._pie_chart(
-                client["balances_by_currency"], f"Balances: {client['full_name']}"),
+            f"client_{client_id}_balances": self._grouped_bar_chart(
+                [(client["full_name"], client["balances_by_currency"])],
+                f"Balances: {client['full_name']}"),
             f"client_{client_id}_balance_history": self._balance_chart(
                 client["accounts"], f"Balance movement: {client['full_name']}"),
         }
@@ -400,8 +407,14 @@ class ReportBuilder:
         return plt
 
     def _pie_chart(self, values, title):
+        """Render a pie chart. ``values`` must be homogeneous, non-negative
+        magnitudes (counts, or amounts already in one currency) — pie slices
+        represent parts of one whole, and matplotlib rejects negative wedges
+        outright."""
         plt = self._plt()
         figure, axis = plt.subplots(figsize=(7, 4.5))
+        if any(value < 0 for value in values.values()):
+            raise ValueError("Pie chart values must be non-negative")
         labels, numbers = zip(*((str(key), float(value)) for key, value in values.items() if value), strict=False) if values else ((), ())
         if numbers:
             axis.pie(numbers, labels=labels, autopct="%1.1f%%", startangle=90)
