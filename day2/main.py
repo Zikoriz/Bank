@@ -85,7 +85,7 @@ def test_investment_account():
 
     account = InvestmentAccount(
         owner="Roman",
-        balance=5000,
+        balance=11000,
         currency="USD",
         portfolio={
             "stocks": 5000,

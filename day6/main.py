@@ -17,7 +17,20 @@ from day5 import AuditLog, RiskAnalyzer, RiskControlledProcessor, SecureBank
 
 
 class DemoBank(SecureBank):
-    """A bank whose clock check is disabled so the example runs at any hour."""
+    """A bank whose clock check is disabled so the example runs at any hour.
+
+    Clock policy (REQ-M4): the bank's own night ban normally uses wall-clock
+    ``datetime.now()`` (see ``Bank._check_operation_time``); this demo
+    disables it entirely so the scenario is reproducible regardless of when
+    it is actually run. The risk analyzer's ``night_operation`` signal is
+    independent and always evaluated against the transaction's *scripted*
+    ``created_at`` (see ``transaction_plan``), which is how the demo can
+    still model "money never moves at night" (via the bank clock, if it were
+    left on) separately from "flag night activity as risky" (via the risk
+    analyzer, always on here). Because ``transaction_plan`` never schedules a
+    transaction between ``night_start``/``night_end``, neither mechanism
+    actually fires in this run; both are ready for a scenario that does.
+    """
 
     def _check_operation_time(self, current_time=None):
         return None

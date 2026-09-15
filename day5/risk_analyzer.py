@@ -41,7 +41,14 @@ class RiskAnalyzer:
         self.reports: list[RiskReport] = []
 
     def analyze(self, transaction, client_id=None, at=None):
-        """Analyze and record one transaction; ``at`` makes testing deterministic."""
+        """Analyze one transaction; ``at`` makes testing deterministic.
+
+        This only *reads* the frequency history (REQ-H4): a transaction that
+        is later rejected must not inflate the count that trips
+        ``frequent_transactions`` for the client's next attempts. The
+        transaction is added to that history only once it actually
+        completes, via :meth:`record_successful_transaction`.
+        """
         at = at or transaction.created_at
         client_key = client_id or transaction.sender
         reasons = []
@@ -52,7 +59,8 @@ class RiskAnalyzer:
         cutoff = at - self.frequent_window
         while history and history[0] < cutoff:
             history.popleft()
-        # Current transaction makes the configured number of transfers in the window.
+        # Current transaction would make the configured number of completed
+        # transfers in the window.
         if len(history) + 1 >= self.frequent_count:
             reasons.append("frequent_transactions")
 
@@ -72,21 +80,30 @@ class RiskAnalyzer:
         elif reasons:
             level = RiskLevel.MEDIUM
 
-        history.append(at)
         report = RiskReport(transaction.transaction_id, client_id, level, tuple(reasons), at)
         self.reports.append(report)
         return report
 
-    def record_successful_transaction(self, transaction, client_id=None):
-        """Trust a recipient only after the bank has completed the transfer."""
+    def record_successful_transaction(self, transaction, client_id=None, at=None):
+        """Trust a recipient and count towards frequency only once completed."""
         if transaction.status != TransactionStatus.COMPLETED:
             raise ValueError("Only completed transactions can make a recipient trusted")
+        at = at or transaction.created_at
         client_key = client_id or transaction.sender
         self._known_recipients[client_key].add(transaction.recipient)
+        self._transactions_by_client[client_key].append(at)
 
-    def is_known_recipient(self, recipient, client_id=None):
-        """Return whether this client has successfully transferred to recipient."""
-        return recipient in self._known_recipients[client_id]
+    def is_known_recipient(self, recipient, client_id=None, sender=None):
+        """Return whether this client has successfully transferred to recipient.
+
+        The lookup key must match ``analyze``/``record_successful_transaction``
+        (``client_id or sender``); at least one of them is required so this
+        never silently reads the shared ``None`` bucket.
+        """
+        if client_id is None and sender is None:
+            raise ValueError("client_id or sender is required")
+        client_key = client_id or sender
+        return recipient in self._known_recipients[client_key]
 
     def suspicious_transactions(self, client_id=None):
         return [report for report in self.reports if report.is_suspicious and

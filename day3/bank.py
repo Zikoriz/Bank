@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from day1.exceptions import AccountClosedError
+from day1.exceptions import AccountClosedError, InvalidOperationError
 from day3.client import Client
 from day2.account import (
     SavingsAccount,
@@ -33,6 +33,20 @@ class Bank:
 
         self.clients[client.client_id] = client
 
+    def _check_client_active_for_withdrawal(self, client_id):
+        """Blocks outgoing money movement for a non-active client (REQ-H1).
+
+        Incoming transfers/deposits are unaffected: this is only ever wired
+        up as an account's ``client_status_checker``, which is consulted from
+        ``_check_withdraw_allowed`` and never from ``deposit``.
+        """
+        client = self.clients.get(client_id)
+
+        if client is not None and client.status != "active":
+            raise InvalidOperationError(
+                f"Client {client_id} is not active"
+            )
+
     def open_account(
         self,
         client_id,
@@ -60,6 +74,11 @@ class Bank:
         if account_type not in account_classes:
             raise ValueError("Invalid account type")
 
+        if "status" in kwargs:
+            raise ValueError(
+                "New accounts are always opened as active"
+            )
+
         account_number = kwargs.get("account_number")
 
         if account_number is not None:
@@ -73,6 +92,7 @@ class Bank:
             balance=balance,
             currency=currency,
             operation_time_checker=self._check_operation_time,
+            client_status_checker=lambda: self._check_client_active_for_withdrawal(client_id),
             **kwargs
         )
 
@@ -94,6 +114,11 @@ class Bank:
 
         if account.status == "closed":
             raise AccountClosedError("Account is already closed")
+
+        if account.balance != 0:
+            raise InvalidOperationError(
+                "Account must have a zero balance before it can be closed"
+            )
 
         account.status = "closed"
 

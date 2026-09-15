@@ -1,6 +1,6 @@
 """Transaction execution, fee calculation, currency conversion and auditing."""
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from day1.exceptions import (
     AccountClosedError,
@@ -10,6 +10,13 @@ from day1.exceptions import (
 )
 
 from .transaction import Transaction, TransactionStatus, to_money
+
+# Accounts (day1/day2) still store balances as float. Every amount is
+# quantized to whole cents with a documented rounding policy before it
+# crosses that boundary, so e.g. Decimal("0.1") + Decimal("0.2") settles as
+# a clean 0.30 instead of a binary-float artifact (REQ-H2).
+MONEY_QUANTUM = Decimal("0.01")
+MONEY_ROUNDING = ROUND_HALF_UP
 
 
 class TransactionProcessor:
@@ -64,7 +71,9 @@ class TransactionProcessor:
                     continue
                 self._reject(transaction, str(error))
                 return transaction
-            transaction.set_status(TransactionStatus.COMPLETED)
+            # REQ-M6: a cancellation that raced in during processing wins.
+            if transaction.status != TransactionStatus.CANCELLED:
+                transaction.set_status(TransactionStatus.COMPLETED)
             return transaction
 
     def process_queue(self, queue, now=None):
@@ -74,27 +83,51 @@ class TransactionProcessor:
         return results
 
     def _process_once(self, transaction):
+        # REQ-M2: reject before any account is touched.
+        if transaction.sender == transaction.recipient:
+            raise InvalidOperationError(
+                "Sender and recipient accounts must differ"
+            )
+
         sender = self._account(transaction.sender)
-        recipient = self._account(transaction.recipient)
         self._validate_account(sender, "Sender")
-        self._validate_account(recipient, "Recipient")
+
+        recipient = self.accounts.get(transaction.recipient)
+        # REQ-M1 (M1-A): only a real (internal) transfer requires the
+        # recipient to exist in this ledger. An external transfer may target
+        # a recipient outside it; crediting that "outside world" is a no-op
+        # here, and the audit layer above records an ``external_settled``
+        # event when it sees a completed external transfer with no
+        # matching account.
+        if recipient is None and not transaction.is_external:
+            raise ValueError(f"Account not found: {transaction.recipient}")
+
+        if recipient is not None:
+            self._validate_account(recipient, "Recipient")
+
         if sender.currency != transaction.currency:
             raise ValueError("Transaction currency must match sender account currency")
 
         transaction.fee = self.calculate_fee(transaction)
-        credited = self._convert(transaction.amount, sender.currency, recipient.currency)
+        credited = (
+            self._convert(transaction.amount, sender.currency, recipient.currency)
+            if recipient is not None else transaction.amount
+        )
 
         debited = False
         try:
             self._debit(sender, transaction.total_debit)
             debited = True
-            self._credit(recipient, credited)
+            if recipient is not None:
+                self._credit(recipient, credited)
         except Exception:
             if debited:
                 self._credit(sender, transaction.total_debit)
             raise
         transaction.converted_amount = credited
-        transaction.destination_currency = recipient.currency
+        transaction.destination_currency = (
+            recipient.currency if recipient is not None else transaction.currency
+        )
 
     def _account(self, account_number):
         account = self.accounts.get(account_number)
@@ -110,14 +143,20 @@ class TransactionProcessor:
             raise AccountClosedError(f"{role} account is closed")
 
     @staticmethod
-    def _debit(account, amount):
-        """Withdraw through the account's domain rules."""
-        account.withdraw(float(amount))
+    def _quantize(amount):
+        """Round to whole cents (ROUND_HALF_UP) before crossing into a
+        float-based account balance (REQ-H2)."""
+        return amount.quantize(MONEY_QUANTUM, rounding=MONEY_ROUNDING)
 
-    @staticmethod
-    def _credit(account, amount):
+    @classmethod
+    def _debit(cls, account, amount):
+        """Withdraw through the account's domain rules."""
+        account.withdraw(float(cls._quantize(amount)))
+
+    @classmethod
+    def _credit(cls, account, amount):
         """Deposit through the account's domain rules."""
-        account.deposit(float(amount))
+        account.deposit(float(cls._quantize(amount)))
 
     def _convert(self, amount, source_currency, target_currency):
         if source_currency == target_currency:

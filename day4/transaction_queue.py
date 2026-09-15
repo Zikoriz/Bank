@@ -77,10 +77,12 @@ class TransactionQueue:
         transaction = self._transactions.get(transaction_id)
         if transaction is None:
             raise ValueError("Transaction not found")
-        if transaction.status in {
-            TransactionStatus.CANCELLED,
-            TransactionStatus.COMPLETED,
-            TransactionStatus.REJECTED,
+        # REQ-M6: only PENDING/SCHEDULED transactions may be postponed or
+        # cancelled -- in particular not PROCESSING (already in flight) nor
+        # any terminal status.
+        if transaction.status not in {
+            TransactionStatus.PENDING,
+            TransactionStatus.SCHEDULED,
         }:
             raise ValueError("Transaction can no longer be changed")
         return transaction

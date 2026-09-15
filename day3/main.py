@@ -63,7 +63,7 @@ def test_clients_and_accounts(bank):
     investment_account = bank.open_account(
         client_id="C002",
         account_type="investment",
-        balance=7000,
+        balance=11000,
         currency="USD",
         portfolio={
             "stocks": 5000,
@@ -118,6 +118,9 @@ def test_close_account(bank, client, account):
 
     print("До закрытия:")
     print(f"Счета клиента: {client.account_numbers}")
+
+    if account.balance != 0:
+        account.withdraw(account.balance)
 
     bank.close_account(account.account_number)
 

@@ -301,8 +301,14 @@ class ReportBuilder:
 
     @staticmethod
     def _balances_by_currency(accounts):
+        """Sum balances by currency, one rule shared with ``Bank`` (I5):
+        a closed account's balance is not "gone" (it still appears in the
+        ``accounts`` listing), it is simply excluded from this aggregate,
+        matching ``Bank.get_total_balance``/``get_clients_ranking``."""
         totals = defaultdict(lambda: Decimal("0"))
         for account in accounts:
+            if account["status"] == "closed":
+                continue
             totals[account["currency"]] += ReportBuilder._decimal(account["balance"])
         return dict(sorted(totals.items()))
 

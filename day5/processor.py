@@ -31,6 +31,15 @@ class RiskControlledProcessor(TransactionProcessor):
         result = super().process(transaction)
         if result.status == TransactionStatus.COMPLETED:
             self.risk_analyzer.record_successful_transaction(result, client_id)
+            if result.is_external and result.recipient not in self.accounts:
+                # M1-A: the recipient lives outside this ledger; there is
+                # nothing to credit, but the settlement is still audited.
+                self.audit_log.log(
+                    "external_settled", Severity.INFO,
+                    "External transfer settled outside the ledger",
+                    transaction_id=result.transaction_id, client_id=client_id,
+                    recipient=result.recipient,
+                )
         severity = Severity.INFO if result.status == TransactionStatus.COMPLETED else Severity.ERROR
         self.audit_log.log("transaction_processed", severity,
                            "Transaction completed" if severity == Severity.INFO else result.rejection_reason,

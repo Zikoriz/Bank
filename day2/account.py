@@ -15,7 +15,8 @@ class SavingsAccount(BankAccount):
         account_number=None,
         min_balance=0,
         monthly_interest_rate=0,
-        operation_time_checker=None
+        operation_time_checker=None,
+        client_status_checker=None,
     ):
         if not isinstance(min_balance, (int, float)):
             raise TypeError("Minimum balance must be a number")
@@ -29,6 +30,11 @@ class SavingsAccount(BankAccount):
         if monthly_interest_rate < 0:
             raise ValueError("Interest rate cannot be negative")
 
+        if monthly_interest_rate > 1:
+            raise ValueError(
+                "Interest rate must be a fraction between 0 and 1"
+            )
+
         if balance < min_balance:
             raise ValueError("Balance cannot be less than minimum balance")
 
@@ -38,23 +44,19 @@ class SavingsAccount(BankAccount):
             status=status,
             currency=currency,
             account_number=account_number,
-            operation_time_checker=operation_time_checker
+            operation_time_checker=operation_time_checker,
+            client_status_checker=client_status_checker,
         )
 
         self.min_balance = min_balance
         self.monthly_interest_rate = monthly_interest_rate
 
     def withdraw(self, amount):
-        self._check_operation_time()
-        self._check_account_status()
+        self._check_withdraw_allowed()
+        self._validate_amount(amount)
 
-        if not isinstance(amount, (int, float)):
-            raise InvalidOperationError("Amount must be a number")
-
-        if amount <= 0:
-            raise InvalidOperationError(
-                "Amount must be greater than zero"
-            )
+        if amount > self._balance:
+            raise InsufficientFundsError("Insufficient funds")
 
         if self._balance - amount < self.min_balance:
             raise InvalidOperationError(
@@ -103,7 +105,8 @@ class PremiumAccount(BankAccount):
         withdraw_limit=10000,
         overdraft_limit=5000,
         monthly_fee=100,
-        operation_time_checker=None
+        operation_time_checker=None,
+        client_status_checker=None,
     ):
         if not isinstance(withdraw_limit, (int, float)):
             raise TypeError("Withdraw limit must be a number")
@@ -129,7 +132,8 @@ class PremiumAccount(BankAccount):
             status=status,
             currency=currency,
             account_number=account_number,
-            operation_time_checker=operation_time_checker
+            operation_time_checker=operation_time_checker,
+            client_status_checker=client_status_checker,
         )
 
         self.withdraw_limit = withdraw_limit
@@ -137,30 +141,42 @@ class PremiumAccount(BankAccount):
         self.monthly_fee = monthly_fee
 
     def withdraw(self, amount):
-        self._check_operation_time()
-        self._check_account_status()
+        """Withdraw exactly ``amount``.
 
-        if not isinstance(amount, (int, float)):
-            raise InvalidOperationError("Amount must be a number")
-
-        if amount <= 0:
-            raise InvalidOperationError(
-                "Amount must be greater than zero"
-            )
+        The monthly fee is a separate charge (REQ-C1) applied only through
+        ``apply_monthly_fee``; it must never be folded into a transfer debit.
+        """
+        self._check_withdraw_allowed()
+        self._validate_amount(amount)
 
         if amount > self.withdraw_limit:
             raise InvalidOperationError(
                 "Withdrawal limit exceeded"
             )
 
-        total_amount = amount + self.monthly_fee
-
-        if self._balance - total_amount < -self.overdraft_limit:
+        if self._balance - amount < -self.overdraft_limit:
             raise InsufficientFundsError(
                 "Overdraft limit exceeded"
             )
 
-        self._balance -= total_amount
+        self._balance -= amount
+
+    def apply_monthly_fee(self):
+        """Charge the periodic account-maintenance fee.
+
+        This is independent of any transfer/withdrawal and must be invoked
+        explicitly (e.g. once per billing period), never implicitly from
+        ``withdraw``.
+        """
+        self._check_operation_time()
+        self._check_account_status()
+
+        if self._balance - self.monthly_fee < -self.overdraft_limit:
+            raise InsufficientFundsError(
+                "Overdraft limit exceeded"
+            )
+
+        self._balance -= self.monthly_fee
 
     def get_account_info(self):
         info = super().get_account_info()
@@ -189,10 +205,10 @@ class PremiumAccount(BankAccount):
 class InvestmentAccount(BankAccount):
     ASSET_TYPES = {"stocks", "bonds", "etf"}
 
-    GROWTH_RATES = {
+    DEFAULT_GROWTH_RATES = {
         "stocks": 0.10,
-        "bonds": 0.05,
-        "etf": 0.08,
+        "bonds": 0.04,
+        "etf": 0.07,
     }
 
     def __init__(
@@ -203,7 +219,8 @@ class InvestmentAccount(BankAccount):
         currency="RUB",
         account_number=None,
         portfolio=None,
-        operation_time_checker=None
+        operation_time_checker=None,
+        client_status_checker=None,
     ):
         super().__init__(
             owner=owner,
@@ -211,7 +228,8 @@ class InvestmentAccount(BankAccount):
             status=status,
             currency=currency,
             account_number=account_number,
-            operation_time_checker=operation_time_checker
+            operation_time_checker=operation_time_checker,
+            client_status_checker=client_status_checker,
         )
 
         if portfolio is None:
@@ -229,35 +247,69 @@ class InvestmentAccount(BankAccount):
                     f"Amount for {asset} must be a number"
                 )
 
-            if amount < 0:
+            if amount <= 0:
                 raise ValueError(
-                    f"Amount for {asset} cannot be negative"
+                    f"Amount for {asset} must be greater than zero"
                 )
 
-        self.portfolio = portfolio.copy()
-
-    def withdraw(self, amount):
-        self._check_operation_time()
-        self._check_account_status()
-
-        if not isinstance(amount, (int, float)):
-            raise InvalidOperationError("Amount must be a number")
-
-        if amount <= 0:
-            raise InvalidOperationError(
-                "Amount must be greater than zero"
+        if sum(portfolio.values()) > balance:
+            raise ValueError(
+                "Portfolio total exceeds available balance"
             )
 
-        if amount > self._balance:
-            raise InsufficientFundsError("Insufficient funds")
+        self._portfolio = portfolio.copy()
+
+    @property
+    def portfolio(self):
+        """Read-only view; use the constructor to set the initial allocation."""
+        return dict(self._portfolio)
+
+    @property
+    def allocated(self):
+        return sum(self._portfolio.values())
+
+    @property
+    def available(self):
+        """Cash that is not tied up in the portfolio (REQ-C2 / I4)."""
+        return self._balance - self.allocated
+
+    def withdraw(self, amount):
+        """Withdraw from free cash only; the invested portfolio is untouched."""
+        self._check_withdraw_allowed()
+        self._validate_amount(amount)
+
+        if amount > self.available:
+            raise InsufficientFundsError(
+                "Insufficient available (non-invested) funds"
+            )
 
         self._balance -= amount
 
-    def project_yearly_growth(self):
+    def project_yearly_growth(self, growth_rates=None):
+        if growth_rates is None:
+            growth_rates = self.DEFAULT_GROWTH_RATES
+
+        if not isinstance(growth_rates, dict):
+            raise TypeError("growth_rates must be a dictionary")
+
+        for asset, rate in growth_rates.items():
+            if asset not in self.ASSET_TYPES:
+                raise ValueError(f"Invalid asset type: {asset}")
+
+            if not isinstance(rate, (int, float)):
+                raise TypeError(
+                    f"Growth rate for {asset} must be a number"
+                )
+
         projected_growth = {}
 
-        for asset, amount in self.portfolio.items():
-            rate = self.GROWTH_RATES[asset]
+        for asset, amount in self._portfolio.items():
+            if asset not in growth_rates:
+                raise ValueError(
+                    f"Missing growth rate for asset: {asset}"
+                )
+
+            rate = growth_rates[asset]
             growth = amount * rate
 
             projected_growth[asset] = {
@@ -272,6 +324,8 @@ class InvestmentAccount(BankAccount):
         info = super().get_account_info()
         info.update({
             "portfolio": self.portfolio,
+            "allocated": self.allocated,
+            "available": self.available,
             "projected_yearly_growth": self.project_yearly_growth()
         })
         return info
